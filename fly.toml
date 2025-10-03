@@ -1,0 +1,32 @@
+# fly.toml app configuration file generated for gmail-mcp-server on 2024-01-01T00:00:00Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "gmail-mcp-server"
+primary_region = "ord"
+
+[build]
+
+[env]
+  GMAIL_TOKEN_PATH = "/app/token.json"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[http_service.checks]]
+  interval = "10s"
+  grace_period = "5s"
+  method = "GET"
+  timeout = "2s"
+  path = "/health"
+
+[machines]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

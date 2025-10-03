@@ -1720,11 +1720,102 @@ if __name__ == "__main__":
     
     # Check if we should run with SSE instead of stdio
     if len(sys.argv) > 1 and sys.argv[1] == "--sse":
-        mount_path = "/sse"
+        # Support both mount_path and host:port formats
         if len(sys.argv) > 2:
-            mount_path = sys.argv[2]
-        print(f"Starting Gmail MCP Server with SSE transport at {mount_path}")
-        mcp.run(transport='sse', mount_path=mount_path)
+            arg = sys.argv[2]
+            if ':' in arg:
+                # Format: host:port (for containerized deployment)
+                host, port = arg.split(':')
+                port = int(port)
+                print(f"Starting Gmail MCP Server with SSE transport on {host}:{port}")
+                # For containerized deployment, we need to use uvicorn directly
+                import uvicorn
+                from fastapi import FastAPI
+                from fastapi.responses import StreamingResponse
+                import asyncio
+                import json
+                
+                # Create a FastAPI app for containerized deployment
+                app = FastAPI(title="Gmail MCP Server", version="1.0.0")
+                
+                @app.get("/")
+                async def root():
+                    return {
+                        "service": "Gmail MCP Server",
+                        "version": "1.0.0",
+                        "status": "running",
+                        "endpoints": {
+                            "mcp": "/sse",
+                            "health": "/health"
+                        }
+                    }
+                
+                @app.get("/health")
+                async def health():
+                    try:
+                        from utils.auth import get_gmail_service
+                        service = get_gmail_service()
+                        profile = service.users().getProfile(userId='me').execute()
+                        gmail_status = "connected"
+                    except Exception as e:
+                        gmail_status = f"error: {str(e)[:100]}"
+                    
+                    return {
+                        "status": "healthy",
+                        "gmail_api": gmail_status,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
+                @app.get("/sse")
+                async def sse_endpoint():
+                    async def event_stream():
+                        # Send initial connection event
+                        yield f"data: {json.dumps({'type': 'connected', 'message': 'Gmail MCP Server connected'})}\n\n"
+                        
+                        # Send server info
+                        server_info = {
+                            "type": "server_info",
+                            "name": "Gmail MCP Server",
+                            "version": "1.0.0",
+                            "tools": [
+                                "send_email", "read_email", "search_emails",
+                                "create_email_draft", "get_unread_emails",
+                                "manage_labels", "batch_operations"
+                            ]
+                        }
+                        yield f"data: {json.dumps(server_info)}\n\n"
+                        
+                        # Keep connection alive with periodic pings
+                        while True:
+                            await asyncio.sleep(30)
+                            ping_data = {
+                                "type": "ping",
+                                "timestamp": int(time.time())
+                            }
+                            yield f"data: {json.dumps(ping_data)}\n\n"
+                    
+                    return StreamingResponse(
+                        event_stream(),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Access-Control-Allow-Origin": "*",
+                        }
+                    )
+                
+                # Run with uvicorn
+                uvicorn.run(app, host=host, port=port)
+            else:
+                # Format: mount_path (for local development)
+                mount_path = arg
+                print(f"Starting Gmail MCP Server with SSE transport at {mount_path}")
+                mcp.run(transport='sse', mount_path=mount_path)
+        else:
+            # Default mount path
+            mount_path = "/sse"
+            print(f"Starting Gmail MCP Server with SSE transport at {mount_path}")
+            mcp.run(transport='sse', mount_path=mount_path)
     else:
         # Default to stdio transport
         print("Starting Gmail MCP Server with stdio transport")
